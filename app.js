@@ -106,7 +106,7 @@ function createTrendPauta(item){
   const draft=blankItem(today);
   draft.title=item.topic;
   draft.type="Tendência YouTube";
-  draft.notes=`Tema identificado no radar semanal do YouTube. Índice relativo: ${item.index}/100${item.growth?`. Crescimento: ${item.growth}`:""}. Pesquisa relacionada a: ${item.seed}.`;
+  draft.notes=`Tema identificado no radar semanal do YouTube. Índice relativo: ${item.index}/100. ${item.viewsLabel?`O vídeo de referência aparece com ${item.viewsLabel}. `:""}Pesquisa relacionada a: ${item.seed}.`;
   draft.supportLinks=[
     {id:uuid(),url:item.youtubeUrl},
     {id:uuid(),url:item.trendsUrl}
@@ -285,7 +285,7 @@ function renderResults(){
     <section class="result-stats"><article><strong>${published}</strong><span>Publicadas</span></article><article><strong>${approval}</strong><span>Em aprovação</span></article><article><strong>${pending}</strong><span>Entregas pendentes</span></article><article><strong>${pct}%</strong><span>Conclusão</span></article></section>
     <section class="trend-section">
       <div class="trend-head">
-        <div><p class="eyebrow">RADAR YOUTUBE SEMANAL</p><h2>10 temas com maior sinal de procura.</h2><span>Brasil · últimos 7 dias · Google Trends na Pesquisa do YouTube.</span></div>
+        <div><p class="eyebrow">RADAR YOUTUBE SEMANAL</p><h2>10 temas com maior sinal de procura.</h2><span>Brasil · vídeos publicados/encontrados nesta semana · Pesquisa pública do YouTube.</span></div>
         <button class="btn secondary sm" id="refresh-trends">Atualizar tendências</button>
       </div>
       <div class="trend-tabs">
@@ -320,12 +320,12 @@ function renderTrendPanel(){
   panel.innerHTML=`
     <div class="trend-meta"><span><strong>${esc(data.label)}</strong> · ${esc(data.period)} · ${esc(data.geo)}</span><span>Atualizado ${new Date(data.updatedAt).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span></div>
     <div class="trend-table">
-      <div class="trend-row trend-header"><span>#</span><span>Tema</span><span>Índice</span><span>Crescimento</span><span>Ações</span></div>
+      <div class="trend-row trend-header"><span>#</span><span>Tema</span><span>Índice</span><span>Visualizações</span><span>Ações</span></div>
       ${(data.items||[]).map(item=>`<div class="trend-row">
         <strong class="trend-rank">${String(item.rank).padStart(2,"0")}</strong>
         <div class="trend-topic"><b>${esc(item.topic)}</b><small>Relacionado a ${esc(item.seed)}</small></div>
         <div class="trend-score"><strong>${esc(item.index)}</strong><div><i style="width:${Math.max(4,Math.min(100,Number(item.index)||0))}%"></i></div></div>
-        <span class="trend-growth">${item.growth?esc(item.growth):"—"}</span>
+        <span class="trend-growth">${item.viewsLabel?esc(item.viewsLabel):"—"}</span>
         <div class="trend-actions"><a href="${esc(item.youtubeUrl)}" target="_blank" rel="noreferrer">YouTube ↗</a><button data-trend-pauta="${item.rank}">＋ Pauta</button></div>
       </div>`).join("")}
     </div>
