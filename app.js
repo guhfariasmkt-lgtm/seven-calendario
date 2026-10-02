@@ -253,7 +253,7 @@ function metrics(){
 function renderCalendar(){
   const {monthItems,complete,pct,pending}=metrics();
   document.querySelector("#page").innerHTML=`
-    <section class="hero"><div><p class="eyebrow">PLANEJAMENTO SEVEN</p><h1>Calendário editorial<b>.</b></h1><small>Um único calendário para toda a equipe, atualizado em tempo real.</small></div><button class="btn" id="new-item">＋ Nova pauta</button></section>
+    <section class="hero"><div><p class="eyebrow">PLANEJAMENTO SEVEN</p><h1>Calendário editorial<b>.</b></h1><small>Um único calendário para toda a equipe, sincronizado automaticamente.</small></div><button class="btn" id="new-item">＋ Nova pauta</button></section>
     <section class="metrics">
       <article class="metric progress"><div><span>Conclusão do mês</span><strong>${pct}%</strong></div><div class="progress-track"><i style="width:${pct}%"></i></div></article>
       <article class="metric"><span>Pautas</span><strong>${monthItems.length}</strong><small>${complete} concluídas</small></article>
