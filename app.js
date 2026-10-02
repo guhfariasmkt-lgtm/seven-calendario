@@ -67,12 +67,7 @@ function openMember(id){
 function closeModal(){state.modal=null;document.querySelector(".modal-backdrop")?.remove()}
 
 function brandMark(size=42){
-  return `<svg class="seven-mark" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true">
-    <rect width="100" height="100" rx="18" fill="#123f2d"/>
-    <path d="M25 39h21v15h-9v15h12v14C34 80 25 70 25 55V39Z" fill="#d7ccb5"/>
-    <path d="M57 21c14 2 23 13 23 28v31H65V48c0-7-3-11-8-13V21Z" fill="#f4f1e7"/>
-    <path d="M46 54h13v11H46z" fill="#123f2d"/>
-  </svg>`;
+  return `<img class="seven-mark" src="./seven-logo.webp" alt="SEVEN" style="width:${size}px;height:auto;max-height:${size}px;object-fit:contain">`;
 }
 function clearSession(){
   localStorage.removeItem(SESSION_KEY);
