@@ -3,6 +3,7 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 const SUPABASE_URL = "https://prgcrsxjypqogzlynyyv.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Q4M0NiyetnnwxXRE2gGLpg_VI9_CYwJ";
 const NEWS_URL = `${SUPABASE_URL}/functions/v1/seven-news`;
+const TRENDS_URL = `${SUPABASE_URL}/functions/v1/youtube-trends`;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const STATUS=["Planejamento","Roteiro","Captação","Edição / design","Aprovação","Publicação","Publicado"];
@@ -12,6 +13,7 @@ const app=document.querySelector("#app");
 const state={
   page:"calendar", year:2026, month:9, search:"", person:"all", onlyOwing:false,
   payload:{team:[],items:[]}, revision:0, holidays:{}, news:null, newsUpdatedAt:null,
+  youtubeTrends:{}, trendNiche:"marketing", trendLoading:false, trendError:"",
   connected:false, saving:false, modal:null, dragId:null, dragOver:null
 };
 
@@ -84,6 +86,35 @@ async function loadNews(){
     if(!r.ok)throw new Error("news");
     const d=await r.json(); state.news=d.items||[]; state.newsUpdatedAt=d.updatedAt; renderNews();
   }catch{state.news=[];renderNews(true)}
+}
+async function loadYouTubeTrends(niche=state.trendNiche,force=false){
+  state.trendNiche=niche; state.trendLoading=true; state.trendError="";
+  renderTrendPanel();
+  try{
+    const r=await fetch(`${TRENDS_URL}?niche=${encodeURIComponent(niche)}${force?"&refresh=1":""}`,{headers:{apikey:SUPABASE_KEY}});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||"Não foi possível carregar as tendências");
+    state.youtubeTrends[niche]=d;
+  }catch(err){
+    state.trendError=err?.message||"Não foi possível carregar as tendências do YouTube.";
+  }finally{
+    state.trendLoading=false; renderTrendPanel();
+  }
+}
+function createTrendPauta(item){
+  const today=new Date().toLocaleDateString("en-CA",{timeZone:"America/Sao_Paulo"});
+  const draft=blankItem(today);
+  draft.title=item.topic;
+  draft.type="Tendência YouTube";
+  draft.notes=`Tema identificado no radar semanal do YouTube. Índice relativo: ${item.index}/100${item.growth?`. Crescimento: ${item.growth}`:""}. Pesquisa relacionada a: ${item.seed}.`;
+  draft.supportLinks=[
+    {id:uuid(),url:item.youtubeUrl},
+    {id:uuid(),url:item.trendsUrl}
+  ];
+  state.page="calendar";
+  const d=new Date(`${today}T12:00:00`); state.year=d.getFullYear(); state.month=d.getMonth();
+  render();
+  state.modal={type:"item",value:draft}; renderModal();
 }
 function realtime(){
   supabase.channel("seven-workspace")
@@ -252,8 +283,57 @@ function renderResults(){
   document.querySelector("#page").innerHTML=`
     <section class="hero"><div><p class="eyebrow">DO CONTEÚDO AO RESULTADO</p><h1>Resultados e direção<b>.</b></h1><small>Acompanhe a execução e use os dados para decidir o próximo movimento.</small></div></section>
     <section class="result-stats"><article><strong>${published}</strong><span>Publicadas</span></article><article><strong>${approval}</strong><span>Em aprovação</span></article><article><strong>${pending}</strong><span>Entregas pendentes</span></article><article><strong>${pct}%</strong><span>Conclusão</span></article></section>
+    <section class="trend-section">
+      <div class="trend-head">
+        <div><p class="eyebrow">RADAR YOUTUBE SEMANAL</p><h2>10 temas com maior sinal de procura.</h2><span>Brasil · últimos 7 dias · Google Trends na Pesquisa do YouTube.</span></div>
+        <button class="btn secondary sm" id="refresh-trends">Atualizar tendências</button>
+      </div>
+      <div class="trend-tabs">
+        <button data-trend-niche="marketing">Marketing digital</button>
+        <button data-trend-niche="negocios">Negócios</button>
+        <button data-trend-niche="empresarios">Empresários</button>
+      </div>
+      <div id="trend-panel"></div>
+    </section>
     <section class="direction"><p class="eyebrow">NOSSA DIREÇÃO</p><h2>Mais clareza.<br>Mais execução.</h2><span>Mensagem, responsabilidade e leitura de resultado no mesmo sistema.</span></section>
     <section class="result-grid"><article><span>01</span><h3>Autoridade útil</h3><p>Transformar repertório estratégico em conteúdo aplicável.</p></article><article><span>02</span><h3>Operação visível</h3><p>Gargalos aparecem antes de virarem atraso.</p></article><article><span>03</span><h3>Decisão por dados</h3><p>Acompanhar o mês para ajustar pauta, formato e responsabilidade.</p></article></section>`;
+  document.querySelectorAll("[data-trend-niche]").forEach(b=>b.addEventListener("click",()=>{
+    state.trendNiche=b.dataset.trendNiche;
+    renderTrendPanel();
+    if(!state.youtubeTrends[state.trendNiche])loadYouTubeTrends(state.trendNiche);
+  }));
+  document.querySelector("#refresh-trends").onclick=()=>loadYouTubeTrends(state.trendNiche,true);
+  renderTrendPanel();
+  if(!state.youtubeTrends[state.trendNiche]&&!state.trendLoading)loadYouTubeTrends(state.trendNiche);
+}
+function renderTrendPanel(){
+  const panel=document.querySelector("#trend-panel"); if(!panel)return;
+  document.querySelectorAll("[data-trend-niche]").forEach(b=>b.classList.toggle("active",b.dataset.trendNiche===state.trendNiche));
+  if(state.trendLoading&&!state.youtubeTrends[state.trendNiche]){
+    panel.innerHTML=`<div class="trend-loading">Buscando os sinais de procura desta semana no YouTube…</div>`;return;
+  }
+  if(state.trendError&&!state.youtubeTrends[state.trendNiche]){
+    panel.innerHTML=`<div class="trend-error">${esc(state.trendError)}</div>`;return;
+  }
+  const data=state.youtubeTrends[state.trendNiche];
+  if(!data){panel.innerHTML=`<div class="trend-loading">Carregando tendências…</div>`;return}
+  panel.innerHTML=`
+    <div class="trend-meta"><span><strong>${esc(data.label)}</strong> · ${esc(data.period)} · ${esc(data.geo)}</span><span>Atualizado ${new Date(data.updatedAt).toLocaleString("pt-BR",{timeZone:"America/Sao_Paulo",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</span></div>
+    <div class="trend-table">
+      <div class="trend-row trend-header"><span>#</span><span>Tema</span><span>Índice</span><span>Crescimento</span><span>Ações</span></div>
+      ${(data.items||[]).map(item=>`<div class="trend-row">
+        <strong class="trend-rank">${String(item.rank).padStart(2,"0")}</strong>
+        <div class="trend-topic"><b>${esc(item.topic)}</b><small>Relacionado a ${esc(item.seed)}</small></div>
+        <div class="trend-score"><strong>${esc(item.index)}</strong><div><i style="width:${Math.max(4,Math.min(100,Number(item.index)||0))}%"></i></div></div>
+        <span class="trend-growth">${item.growth?esc(item.growth):"—"}</span>
+        <div class="trend-actions"><a href="${esc(item.youtubeUrl)}" target="_blank" rel="noreferrer">YouTube ↗</a><button data-trend-pauta="${item.rank}">＋ Pauta</button></div>
+      </div>`).join("")}
+    </div>
+    <div class="trend-note">${esc(data.note||"O índice é relativo e não representa volume absoluto de buscas.")}</div>`;
+  panel.querySelectorAll("[data-trend-pauta]").forEach(b=>b.onclick=()=>{
+    const item=(data.items||[]).find(x=>String(x.rank)===b.dataset.trendPauta);
+    if(item)createTrendPauta(item);
+  });
 }
 
 function renderModal(){
