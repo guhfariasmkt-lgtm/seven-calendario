@@ -1,10 +1,10 @@
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/+esm";
-
 const SUPABASE_URL = "https://prgcrsxjypqogzlynyyv.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Q4M0NiyetnnwxXRE2gGLpg_VI9_CYwJ";
 const NEWS_URL = `${SUPABASE_URL}/functions/v1/seven-news`;
 const TRENDS_URL = `${SUPABASE_URL}/functions/v1/youtube-trends`;
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const WORKSPACE_URL = `${SUPABASE_URL}/functions/v1/seven-workspace`;
+const SESSION_KEY = "seven_shared_access_session";
+let pollTimer=null;
 
 const STATUS=["Planejamento","Roteiro","Captação","Edição / design","Aprovação","Publicação","Publicado"];
 const FORMATS=["Reels","Stories","Carrossel","Live","Foto editorial","VSL curta","Depoimento","ASMR","Evento presencial"];
@@ -14,7 +14,8 @@ const state={
   page:"calendar", year:2026, month:9, search:"", person:"all", onlyOwing:false,
   payload:{team:[],items:[]}, revision:0, holidays:{}, news:null, newsUpdatedAt:null,
   youtubeTrends:{}, trendNiche:"marketing", trendLoading:false, trendError:"",
-  connected:false, saving:false, modal:null, dragId:null, dragOver:null
+  connected:false, saving:false, modal:null, dragId:null, dragOver:null,
+  sessionToken:localStorage.getItem(SESSION_KEY)||""
 };
 
 const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
@@ -65,20 +66,104 @@ function openMember(id){
 }
 function closeModal(){state.modal=null;document.querySelector(".modal-backdrop")?.remove()}
 
-async function loadWorkspace(){
-  const {data,error}=await supabase.from("workspace_state").select("payload,revision,updated_at").eq("id","seven-main").single();
-  if(error)throw error;
+function brandMark(size=42){
+  return `<svg class="seven-mark" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true">
+    <rect width="100" height="100" rx="18" fill="#123f2d"/>
+    <path d="M25 39h21v15h-9v15h12v14C34 80 25 70 25 55V39Z" fill="#d7ccb5"/>
+    <path d="M57 21c14 2 23 13 23 28v31H65V48c0-7-3-11-8-13V21Z" fill="#f4f1e7"/>
+    <path d="M46 54h13v11H46z" fill="#123f2d"/>
+  </svg>`;
+}
+function clearSession(){
+  localStorage.removeItem(SESSION_KEY);
+  state.sessionToken="";
+  state.connected=false;
+  if(pollTimer){clearInterval(pollTimer);pollTimer=null}
+}
+async function authFetch(body){
+  const r=await fetch(WORKSPACE_URL,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(d.error||"Não foi possível entrar");
+  return d;
+}
+async function workspaceFetch(method="GET",body=null){
+  if(!state.sessionToken)throw new Error("Sessão não encontrada");
+  const r=await fetch(WORKSPACE_URL,{
+    method,
+    headers:{"content-type":"application/json","authorization":`Bearer ${state.sessionToken}`},
+    body:body?JSON.stringify(body):undefined
+  });
+  const d=await r.json().catch(()=>({}));
+  if(r.status===401){
+    clearSession();
+    renderLogin("Sua sessão expirou. Entre novamente.");
+    throw new Error("Sessão expirada");
+  }
+  if(!r.ok)throw new Error(d.error||"Falha de sincronização");
+  return d;
+}
+async function loadWorkspace(silent=false){
+  const data=await workspaceFetch("GET");
+  const changed=(data.revision||0)!==state.revision;
   state.payload=data.payload||{team:[],items:[]};
   state.revision=data.revision||0;
+  state.connected=true;
+  if(silent&&changed&&document.querySelector(".topbar"))render();
+  updateSync();
+  return data;
 }
 async function applyAction(input){
   state.saving=true; updateSync();
-  const {data,error}=await supabase.rpc("apply_workspace_action",{input});
-  state.saving=false;
-  if(error){updateSync(true);throw error}
-  if(data?.payload){state.payload=data.payload;state.revision=data.revision||state.revision+1}
-  render(); updateSync();
-  return data;
+  try{
+    const data=await workspaceFetch("POST",{action:"mutate",input});
+    if(data?.payload){state.payload=data.payload;state.revision=data.revision||state.revision+1}
+    state.connected=true;
+    render(); updateSync();
+    return data;
+  }catch(error){
+    state.connected=false; updateSync(true); throw error;
+  }finally{
+    state.saving=false; updateSync();
+  }
+}
+function startPolling(){
+  if(pollTimer)clearInterval(pollTimer);
+  pollTimer=setInterval(async()=>{
+    if(!state.sessionToken||state.saving)return;
+    try{await loadWorkspace(true)}catch{}
+  },4000);
+}
+function renderLogin(message=""){
+  clearSession();
+  app.innerHTML=`
+    <main class="login-screen">
+      <section class="login-card">
+        <div class="login-brand">${brandMark(78)}<div><p>ÁREA INTERNA</p><h1>SEVEN</h1></div></div>
+        <div class="login-copy"><h2>Acesso ao calendário</h2><p>Use o código e a senha compartilhados da equipe.</p></div>
+        ${message?`<div class="login-error">${esc(message)}</div>`:""}
+        <form id="login-form" class="login-form">
+          <label>Código de acesso<input name="code" autocomplete="username" placeholder="Digite o código" required></label>
+          <label>Senha<input name="password" type="password" autocomplete="current-password" placeholder="Digite a senha" required></label>
+          <button class="btn login-btn" type="submit">Entrar</button>
+        </form>
+        <small class="login-foot">SEVEN · Calendário editorial compartilhado</small>
+      </section>
+    </main>`;
+  document.querySelector("#login-form").onsubmit=async e=>{
+    e.preventDefault();
+    const btn=e.currentTarget.querySelector("button"), fd=new FormData(e.currentTarget);
+    btn.disabled=true;btn.textContent="Entrando…";
+    try{
+      const data=await authFetch({action:"login",code:String(fd.get("code")||"").trim(),password:String(fd.get("password")||"")});
+      state.sessionToken=data.token;
+      localStorage.setItem(SESSION_KEY,data.token);
+      state.holidays=state.holidays&&Object.keys(state.holidays).length?state.holidays:await fetch("./holidays.json").then(r=>r.json());
+      await loadWorkspace();
+      startApp();
+    }catch(err){
+      renderLogin(err?.message||"Código ou senha incorretos");
+    }
+  };
 }
 async function loadNews(){
   try{
@@ -116,13 +201,6 @@ function createTrendPauta(item){
   render();
   state.modal={type:"item",value:draft}; renderModal();
 }
-function realtime(){
-  supabase.channel("seven-workspace")
-    .on("postgres_changes",{event:"UPDATE",schema:"public",table:"workspace_state",filter:"id=eq.seven-main"},payload=>{
-      if(payload.new?.payload){state.payload=payload.new.payload;state.revision=payload.new.revision||state.revision+1;render()}
-    })
-    .subscribe(status=>{state.connected=status==="SUBSCRIBED";updateSync()});
-}
 function updateSync(forceOff=false){
   const dot=document.querySelector(".sync-dot"), txt=document.querySelector(".sync-text");
   if(!dot||!txt)return;
@@ -135,7 +213,7 @@ function shell(){
     <div class="app">
       <header class="topbar">
         <div class="brand">
-          <div style="width:42px;height:42px;border-radius:12px;background:#153e2c;color:#fff;display:grid;place-items:center;font:800 22px var(--display)">7</div>
+          <div class="brand-logo">${brandMark(44)}</div>
           <div><strong>SEVEN</strong><span>Assessoria de Crescimento</span></div>
         </div>
         <nav class="nav">
@@ -143,11 +221,18 @@ function shell(){
           <button data-page="team">Equipe e operação</button>
           <button data-page="results">Resultados e direção</button>
         </nav>
-        <div class="sync"><i class="sync-dot off"></i><span class="sync-text">Reconectando</span></div>
+        <div class="top-actions">
+          <div class="sync"><i class="sync-dot off"></i><span class="sync-text">Reconectando</span></div>
+          <button class="logout-btn" id="logout-btn" title="Sair">Sair</button>
+        </div>
       </header>
       <main class="main" id="page"></main>
     </div>`;
   document.querySelectorAll("[data-page]").forEach(b=>b.addEventListener("click",()=>{state.page=b.dataset.page;render()}));
+  document.querySelector("#logout-btn").onclick=async()=>{
+    try{await workspaceFetch("POST",{action:"logout"})}catch{}
+    clearSession();renderLogin();
+  };
 }
 function render(){
   if(!document.querySelector(".topbar"))shell();
@@ -402,13 +487,18 @@ function wireMemberModal(back){
   back.querySelector("#delete-member")?.addEventListener("click",async()=>{if(confirm("Excluir este membro? As tarefas continuam, mas ficam sem responsável.")){await applyAction({action:"deleteMember",id:draft.id});closeModal()}});
 }
 
+function startApp(){
+  shell();render();startPolling();loadNews();
+  if(!window.__sevenNewsTimer)window.__sevenNewsTimer=setInterval(loadNews,5*60*1000);
+}
 async function boot(){
   try{
-    const [_,h]=await Promise.all([loadWorkspace(),fetch("./holidays.json").then(r=>r.json())]);
-    state.holidays=h||{};
-    shell();render();realtime();loadNews();setInterval(loadNews,5*60*1000);
+    state.holidays=await fetch("./holidays.json").then(r=>r.json());
+    if(!state.sessionToken){renderLogin();return}
+    await loadWorkspace();
+    startApp();
   }catch(err){
-    app.innerHTML=`<div class="loading-screen">Não foi possível carregar o calendário. ${esc(err.message||"")}</div>`;
+    renderLogin("Entre novamente para acessar o calendário.");
   }
 }
 boot();
